@@ -7,20 +7,15 @@
 
 #define TAG "I2C_SCAN"
 
-
+i2c_master_bus_handle_t bus = NULL;
+i2c_master_dev_handle_t dev = NULL;
 
 
 
 void app_main(void)
 {
-    
-    lcd_i2c_hello();
-
-    /*
-    while(true){
-        //AQUI VOCÊ PODE ADICIONAR O CÓDIGO PARA INTERAGIR COM O LCD VIA I2C
-
-        scan_i2c_bus(bus);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }*/
+    i2c_bus_init(&bus);
+    i2c_device_init(bus, &dev);
+    lcd_init(dev);
+    lcd_print(dev, "Hello, World!");
 }

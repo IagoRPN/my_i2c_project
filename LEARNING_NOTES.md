@@ -26,36 +26,33 @@ Aprender a stack I2C do ESP32-S3 do zero até um "Hello World" num LCD de caract
 2. [x] Definir fiação (GPIO14/GPIO13).
 3. [x] Scanner I2C — achou device em 0x27. (validou fiação + driver)
 4. [x] Criar o componente `lcd_i2c` (estrutura + CMake + build/link OK).
-5. **Passo 5a (EM ANDAMENTO)** — camada de transporte (escrever byte "nos pinos"):
-   - [x] defines do mapa de bits
-   - [x] `i2c_bus_init(out_bus)` e `i2c_device_init(bus, out_dev)` via ponteiro de saída
-   - [x] `pcf8574_write`, `lcd_pulse_enable`, `lcd_write_nibble`
-   - [ ] **`lcd_send_byte`** (byte completo = nibble alto + nibble baixo) — AINDA FALTA
-6. [ ] **Passo 5b** — sequência de inicialização do HD44780 (ritual de modo 4-bit) + comandos.
-7. [ ] **Hello World** no LCD.
+5. [x] Camada de transporte: `pcf8574_write`, `lcd_pulse_enable`, `lcd_write_nibble`, `lcd_send_byte`.
+6. [x] Sequência de init do HD44780 (`lcd_set_4_bit_mode` + comandos) e helpers `lcd_send_command`/`lcd_send_data`.
+7. [x] **Hello World no LCD — FUNCIONANDO! 🎉** (`lcd_print` + `app_main` montado).
 
-## Pendências imediatas (retomar AQUI)
-No commit atual, faltam ajustes em `components/lcd_i2c/src/lcd_i2c.c` e `inc/lcd_i2c.h`:
+## STATUS: ✅ "Hello World!" na tela. Objetivo inicial concluído.
 
-1. **5 erros de sintaxe (typos)** introduzidos na última edição:
-   - `.c` linha ~27: parêntese a mais em `i2c_new_master_bus(&bus_cfg, out_bus))` → tirar 1 `)`.
-   - `.c` linha ~39: parêntese a mais em `i2c_master_bus_add_device(bus, &dev_cfg, out_dev))` → tirar 1 `)`.
-   - `.c` linha ~40: `return err` → falta `;`.
-   - `.h` linha ~7: declaração de `i2c_bus_init(...)` → falta `;` no fim.
-   - `.h` linha ~11: declaração de `i2c_device_init(...)` → falta `;` no fim.
-   (Lembrete: header termina com `;`; o `.c` termina com `{ ... }`.)
-2. **Implementar `lcd_send_byte`** (a peça que falta do passo 5a):
-   ```c
-   static void lcd_send_byte(i2c_master_dev_handle_t dev, uint8_t value, uint8_t rs){
-       lcd_write_nibble(dev, value >> 4,   rs);  // nibble alto (bits 7-4)
-       lcd_write_nibble(dev, value & 0x0F, rs);  // nibble baixo (bits 3-0)
-   }
-   ```
-3. Rodar `idf.py build` e confirmar compilação limpa.
+## Pilha de funções construída (arquitetura em camadas)
+```
+app_main → i2c_bus_init / i2c_device_init / lcd_init / lcd_print   (API pública, no header)
+lcd_print → lcd_send_data ─┐
+lcd_init  → lcd_send_command, lcd_set_4_bit_mode ┘
+            lcd_send_data/command → lcd_send_byte → lcd_write_nibble → lcd_pulse_enable → pcf8574_write → I2C
+```
 
-## Perguntas conceituais em aberto (responder ao retomar)
-1. Por que `lcd_write_nibble` desloca o nibble com `<< 4`?
-2. Quando chamamos `lcd_send_byte` com `rs = 0` vs `rs = LCD_RS`?
+## Ideias para continuar (próximos passos opcionais)
+- [ ] `lcd_set_cursor(dev, col, row)` — comando 0x80 | endereço. Linha 0 começa em 0x00, linha 1 em 0x40.
+      (ex.: escrever na 2ª linha do 16x2.)
+- [ ] `lcd_clear(dev)` exposto na API (comando 0x01 + delay >= 2ms).
+- [ ] Caracteres customizados via CGRAM (comando 0x40 + 8 bytes de bitmap) — ex.: desenhar um ícone.
+- [ ] Refatorar: agrupar os comandos em #defines com nome (LCD_CMD_CLEAR 0x01, etc.) em vez de números crus.
+- [ ] (avançado) Empacotar como handle/struct (`lcd_handle_t`) guardando dev + estado do backlight,
+      em vez de passar `dev` em toda função.
+
+## Perguntas conceituais (já respondidas durante a sessão)
+1. Por que `<< 4` no nibble: os dados (D4-D7) ficam no nibble ALTO do byte do PCF8574; o nibble chega no baixo.
+2. `rs = 0` (LCD_RS apagado) = comando/instrução; `rs = LCD_RS` = caractere/dado.
+3. Não há "parse" char→byte: em C o `char` JÁ é o byte ASCII; o glifo é mapeado pela CGROM do LCD.
 
 ## Conceitos-chave já aprendidos (para não reexplicar)
 - Em C, **statements só dentro de funções**; escopo global só aceita declarações/inicializações.
@@ -68,6 +65,6 @@ No commit atual, faltam ajustes em `components/lcd_i2c/src/lcd_i2c.c` e `inc/lcd
 - `idf.py flash monitor` para gravar + ver logs; `vTaskDelay(pdMS_TO_TICKS(ms))` (não ticks crus).
 
 ## Próximo passo do professor ao retomar
-Após os typos + `lcd_send_byte` compilarem: entregar a **sequência de init do HD44780**
-(0x33 / 0x32 → modo 4-bit, function set 0x28, display on 0x0C, clear 0x01, entry mode 0x06,
-com os delays corretos), depois `lcd_set_cursor` + `lcd_print` e finalmente o Hello World.
+Objetivo inicial (Hello World) CONCLUÍDO. Se o aluno quiser continuar, escolher um item da
+seção "Ideias para continuar" acima — sugestão natural: `lcd_set_cursor` para escrever na
+2ª linha, depois caracteres customizados (CGRAM).

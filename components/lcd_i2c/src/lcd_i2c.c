@@ -24,9 +24,8 @@ esp_err_t i2c_bus_init(i2c_master_bus_handle_t *out_bus){
                                                  // RESISTORES EXTERNOS DE 4.7K OU 10K PARA MELHOR DESEMPENHO
     };
     
-    esp_err_t err = i2c_new_master_bus(&bus_cfg, out_bus));
+    esp_err_t err = i2c_new_master_bus(&bus_cfg, out_bus);
     return err;
-
 }
 
 esp_err_t i2c_device_init(i2c_master_bus_handle_t bus, i2c_master_dev_handle_t *out_dev){
@@ -36,9 +35,8 @@ esp_err_t i2c_device_init(i2c_master_bus_handle_t bus, i2c_master_dev_handle_t *
         .scl_speed_hz         = 100000,
     };
     
-    esp_err_t err = i2c_master_bus_add_device(bus, &dev_cfg, out_dev));
-    return err
-
+    esp_err_t err = i2c_master_bus_add_device(bus, &dev_cfg, out_dev);
+    return err;
 }
 
 static esp_err_t pcf8574_write(i2c_master_dev_handle_t dev, uint8_t value){
@@ -59,7 +57,10 @@ static void lcd_write_nibble(i2c_master_dev_handle_t dev, uint8_t nibble, uint8_
     lcd_pulse_enable(dev, data);
 }
 
-
+static void lcd_send_byte(i2c_master_dev_handle_t dev, uint8_t data, uint8_t rs){
+    lcd_write_nibble(dev, data >> 4, rs);
+    lcd_write_nibble(dev, data & 0x0f, rs);
+}
 
 esp_err_t lcd_i2c_hello(void){
     ESP_LOGI(TAG, "i2c component linked with success");
@@ -77,4 +78,41 @@ void scan_i2c_bus(i2c_master_bus_handle_t bus){
             }
         }
     ESP_LOGI(TAG, "Scanning completed: %d devices found", found);
+}
+
+
+static void lcd_set_4_bit_mode(i2c_master_dev_handle_t dev){
+    lcd_write_nibble(dev, 0x03, 0);
+    esp_rom_delay_us(5000);
+    lcd_write_nibble(dev, 0x03, 0);
+    esp_rom_delay_us(150);
+    lcd_write_nibble(dev, 0x03, 0);
+    esp_rom_delay_us(150);
+    lcd_write_nibble(dev, 0x02, 0);
+}
+
+static void lcd_send_command(i2c_master_dev_handle_t dev, uint8_t cmd){
+    lcd_send_byte(dev, cmd, 0);
+}
+
+static void lcd_send_data(i2c_master_dev_handle_t dev, uint8_t ch){
+    lcd_send_byte(dev, ch, LCD_RS);
+}
+
+void lcd_init(i2c_master_dev_handle_t dev){
+    esp_rom_delay_us(50000);
+    lcd_set_4_bit_mode(dev);
+    lcd_send_command(dev, 0x28);
+    lcd_send_command(dev, 0x0C);
+    lcd_send_command(dev, 0x01);
+    esp_rom_delay_us(2000);
+    lcd_send_command(dev, 0x06);
+}
+
+
+void lcd_print(i2c_master_dev_handle_t dev, const char *str){
+    while (*str){
+        lcd_send_data(dev, *str);
+        str++;
+    }
 }
