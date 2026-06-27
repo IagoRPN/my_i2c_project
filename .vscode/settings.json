@@ -6,5 +6,7 @@
     "C_Cpp.errorSquiggles": "disabled",
     "github.copilot.enable":{"*":false},
     "C_Cpp.autocomplete": "default",
-    "C_Cpp.suggestSnippets": false
+    "C_Cpp.suggestSnippets": false,
+    "idf.portWin": "COM6",
+    "idf.flashType": "UART"
 }
