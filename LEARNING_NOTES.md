@@ -4,39 +4,21 @@
 > código**; o Claude apenas explica, revisa e guia — não edita arquivos de código).
 > Use este arquivo para retomar de outra máquina, acompanhando os commits.
 
-## Objetivo
-Aprender a stack I2C do ESP32-S3 do zero até um "Hello World" num LCD de caracteres
-(HD44780) acionado por um expansor I2C **PCF8574T**.
-
 ## Configuração confirmada
-- Toolchain: **ESP-IDF v5.5.4** → usar o driver **NOVO** `driver/i2c_master.h` (não o legado `driver/i2c.h`).
+- Toolchain: **ESP-IDF v5.5.4** → driver **NOVO** `driver/i2c_master.h` (não o legado `driver/i2c.h`).
 - MCU: ESP32-S3.
 - Fiação: **SDA = GPIO14**, **SCL = GPIO13**. VCC do módulo em **5V**, GND comum.
-- Expansor: **PCF8574T**, endereço **0x27** (confirmado via scan `i2c_master_probe`).
-- LCD: **HD44780 16x2**, modo **4-bit**.
-- Mapa de bits do byte enviado ao PCF8574 (backpack padrão):
-  ```
-  bit:  7   6   5   4     3        2     1     0
-       D7  D6  D5  D4  BACKLIGHT  EN    RW    RS
-  ```
-  Defines: RS=0x01, RW=0x02, EN=0x04, BL=0x08, dados no nibble alto (<<4).
+- Expansor: **PCF8574T**, endereço **0x27**. LCD: **HD44780 16x2**, modo **4-bit**.
 
-## Roadmap (passos)
-1. [x] Entender hardware (3 camadas: ESP32 mestre I2C → PCF8574 → HD44780).
-2. [x] Definir fiação (GPIO14/GPIO13).
-3. [x] Scanner I2C — achou device em 0x27. (validou fiação + driver)
-4. [x] Criar o componente `lcd_i2c` (estrutura + CMake + build/link OK).
-5. [x] Camada de transporte: `pcf8574_write`, `lcd_pulse_enable`, `lcd_write_nibble`, `lcd_send_byte`.
-6. [x] Sequência de init do HD44780 (`lcd_set_4_bit_mode` + comandos) e helpers `lcd_send_command`/`lcd_send_data`.
-7. [x] **Hello World no LCD — FUNCIONANDO! 🎉** (`lcd_print` + `app_main` montado).
+---
 
-## STATUS: ✅ Driver de LCD reutilizável COMPLETO e funcionando.
-"Hello World!" + 2ª linha na tela. Componente `lcd_i2c` refatorado para um driver profissional
-(handle opaco, estado encapsulado, erros propagados). Pronto para copiar em outros projetos.
+# ✅ CONCLUÍDO: driver `lcd_i2c` reutilizável (Hello World funcionando)
 
-## API pública do componente `lcd_i2c` (em `inc/lcd_i2c.h`)
+Componente `lcd_i2c` profissional: handle opaco, estado encapsulado, bus injetado, erros propagados.
+
+## API pública (`components/lcd_i2c/inc/lcd_i2c.h`)
 ```c
-typedef struct lcd_i2c_t *lcd_i2c_handle_t;   // handle OPACO (corpo da struct só no .c)
+typedef struct lcd_i2c_t *lcd_i2c_handle_t;   // handle OPACO
 typedef struct { i2c_master_bus_handle_t bus; uint8_t address, columns, rows; uint32_t scl_speed_hz; } lcd_i2c_config_t;
 
 esp_err_t lcd_i2c_create(const lcd_i2c_config_t *config, lcd_i2c_handle_t *out_lcd);  // bus INJETADO
@@ -48,70 +30,129 @@ esp_err_t lcd_i2c_write_char(lcd_i2c_handle_t lcd, char c);
 esp_err_t lcd_i2c_set_backlight(lcd_i2c_handle_t lcd, bool on);
 ```
 Uso: o `app_main` cria o bus (`i2c_new_master_bus`) e injeta no `lcd_i2c_create`.
+(O código original do Hello World está comentado no fim de `main/my_lcd_i2c_project.c`.)
 
-## Pilha de funções (arquitetura em camadas) — internas são `static`
-```
-API pública (lcd_i2c_*) → lcd_send_command / lcd_send_data → lcd_send_byte
-   → lcd_write_nibble (lê lcd->backlight) → lcd_pulse_enable → pcf8574_write → i2c_master_transmit
-lcd_init (static) → lcd_set_4_bit_mode + comandos (LCD_CMD_*)
-```
-
-## Melhorias do refactor (todas FEITAS)
-- [x] `lcd_i2c_set_cursor` (cmd 0x80 | endereço; linha 0 = 0x00, linha 1 = 0x40) + validação de `row`.
-- [x] `lcd_i2c_clear` na API (cmd 0x01 + delay 2ms).
-- [x] `#define`s nomeados pros comandos (LCD_CMD_CLEAR/ENTRY_MODE/DISPLAY_ON/FUNCTION_SET/SET_DDRAM).
-- [x] Handle opaco (`lcd_i2c_handle_t`) com `calloc`/`free`; backlight virou ESTADO (`lcd->backlight`).
-- [x] Bus DESACOPLADO: o componente recebe o bus, não o cria (dono = aplicação).
-- [x] `esp_err_t` propagado em toda a cadeia via `ESP_RETURN_ON_ERROR` (fail-fast).
-- [ ] (futuro, opcional) Caracteres customizados via CGRAM (cmd 0x40 + 8 bytes de bitmap).
-
-## Perguntas conceituais (já respondidas durante a sessão)
-1. Por que `<< 4` no nibble: os dados (D4-D7) ficam no nibble ALTO do byte do PCF8574; o nibble chega no baixo.
-2. `rs = 0` (LCD_RS apagado) = comando/instrução; `rs = LCD_RS` = caractere/dado.
-3. Não há "parse" char→byte: em C o `char` JÁ é o byte ASCII; o glifo é mapeado pela CGROM do LCD.
-
-## Conceitos-chave já aprendidos (para não reexplicar)
-- Em C, **statements só dentro de funções**; escopo global só aceita declarações/inicializações.
-- Handles do IDF saem por **ponteiro de saída** + retorno `esp_err_t` (padrão do `i2c_new_master_bus`).
-- `| bit` liga um bit; `& ~bit` desliga um bit.
-- O PCF8574 só espelha 1 byte → 8 pinos; toda a "inteligência" do LCD é software nosso.
-- O HD44780 lê os pinos na **borda de descida do EN** (pulso de Enable).
-- Modo 4-bit: 1 byte = 2 nibbles = 2 pulsos de EN.
-- `i2c_master_probe` para scan; `i2c_master_transmit(dev, &buf, len, timeout_ms)` para escrever.
-- `idf.py flash monitor` para gravar + ver logs; `vTaskDelay(pdMS_TO_TICKS(ms))` (não ticks crus).
-- **Padrão de driver I2C reutilizável** (vale pra QUALQUER chip I2C):
-  handle opaco + config struct com bus injetado + `create`/`delete` (calloc/free) +
-  internas `static` + API pública `esp_err_t` propagando erro. Bus pertence à aplicação.
-- Inicialização vs atribuição de struct: `= { .campo = v, ... };` (vírgulas, só na declaração)
-  vs `ptr->campo = v;` (statements com `;`). Não misturar.
+## Conceitos-chave já aprendidos (não reexplicar)
+- **Padrão de driver I2C reutilizável** (vale pra QUALQUER chip): handle opaco + config struct com bus
+  injetado + `create`/`delete` (calloc/free) + internas `static` + API pública `esp_err_t`. Bus pertence à app.
+- Em C, statements só dentro de funções; handles do IDF saem por ponteiro de saída + retorno `esp_err_t`.
+- `| bit` liga; `& ~bit` desliga. PCF8574 = 1 byte → 8 pinos; HD44780 lê na borda de descida do EN.
+- `i2c_master_probe` p/ scan; `i2c_master_transmit(dev,&buf,len,timeout)` p/ escrever.
+- `idf.py flash monitor`; `vTaskDelay(pdMS_TO_TICKS(ms))`.
 
 ---
 
-# PRÓXIMO PROJETO: driver para o INA228 (monitor de corrente/potência I2C)
+# 🟡 FOCO ATUAL #1: Relógio NTP no LCD (WiFi + SNTP + timezone SP)
 
-O INA228 é um monitor de energia de alta precisão (ADC sigma-delta de 20 bits) com interface I2C
-— mede tensão de barramento, tensão de shunt, corrente, potência, energia, carga e temperatura.
-Endereço configurável via pinos A0/A1 (faixa 0x40–0x4F).
+**Objetivo da aplicação:** conectar no WiFi → sincronizar via NTP → mostrar a hora (timezone
+São Paulo) no LCD. (O projeto INA228 foi ADIADO — sem o chip em mãos; ver fim do arquivo.)
 
-## O que REAPROVEITA do que já aprendemos
-- O MESMO padrão de driver reutilizável (handle opaco + bus injetado + create/delete + esp_err_t).
-- O MESMO modelo de bus: app cria o bus uma vez, `ina228_create` recebe o bus (vários devices no mesmo barramento — o LCD e o INA228 podem coexistir).
-- Scan I2C para confirmar endereço, ESP_RETURN_ON_ERROR para propagar erro.
+## Conceito central NOVO: modelo ASSÍNCRONO (já destravado na sessão)
+- Diferente do I2C (síncrono), conectar no WiFi é assíncrono: você "pede" e a resposta vem DEPOIS, por EVENTOS, em outra task.
+- **Event loop** (`esp_event`) = central de mensagens (fila). Tasks de WiFi/IP postam eventos lá.
+- **Handler/callback** = função que VOCÊ registra e o sistema chama (inversão de controle — você nunca a chama).
+- **Event Group do FreeRTOS** = ponte de volta pro síncrono: `app_main` faz `xEventGroupWaitBits` (dorme), o handler faz `xEventGroupSetBits` (acende o bit), a `app_main` acorda.
+- **Analogia do restaurante:** pedir = `esp_wifi_connect`; sentar e esperar = `WaitBits`; pager vibrar = evento;
+  comida pronta = **`IP_EVENT_STA_GOT_IP`** (só aí tem IP — `WIFI_EVENT_STA_CONNECTED` é só "associou", SEM IP ainda).
+- Eventos vêm de 2 famílias (event bases) diferentes: `WIFI_EVENT` (rádio) e `IP_EVENT` (esp_netif/lwIP) → registrar handler pras DUAS.
 
-## O que é NOVO (e será o foco do aprendizado)
-- I2C de verdade com REGISTRADORES: ler/escrever registradores internos do chip.
-  → usar `i2c_master_transmit_receive` (escreve o ponteiro de registrador, depois lê N bytes),
-    não só `i2c_master_transmit`. Esse é o conceito central novo.
-- Dados multi-byte big-endian e larguras incomuns (registradores de 16, 24, até 40 bits).
-- Conversão de valor cru (raw) → unidade física (mV, A, W) com LSB/escala e a calibração do shunt
-  (registrador SHUNT_CAL em função do resistor de shunt e da corrente máxima).
-- Números com sinal (complemento de dois) para tensão/corrente que podem ser negativas.
+## Stack WiFi em camadas
+```
+app_main (espera no Event Group)
+ → esp_event (event loop: WIFI_EVENT_* e IP_EVENT_* → handlers)
+ → esp_wifi (driver do rádio: modo STA, SSID/senha, connect/start)
+ → esp_netif (cola driver no TCP/IP; roda DHCP, dá o IP)
+ → lwIP (TCP/IP) | NVS (flash; init ANTES do WiFi)
+```
 
-## Primeiro passo sugerido ao iniciar
-1. Confirmar endereço com o scan (provavelmente 0x40).
-2. Ler o registrador de ID/MANUFACTURER_ID (0x3E, deve devolver 'TI') como "hello world" do INA228 —
-   valida a leitura de registrador antes de qualquer cálculo.
-3. Só então: config, calibração do shunt, e leitura de tensão/corrente.
+## Ordem de init canônica do WiFi
+```
+nvs_flash_init → esp_netif_init → esp_event_loop_create_default
+→ esp_netif_create_default_wifi_sta → esp_wifi_init → registrar handlers (WIFI + IP)
+→ esp_wifi_set_mode(WIFI_MODE_STA) → esp_wifi_set_config → esp_wifi_start
+```
+
+## Roadmap
+1. [~] **Fundação de boot** (NVS + netif + event loop) — escrito, FALTA REVISAR (ver pendências).
+2. [ ] Sequência WiFi + handlers (4 eventos: STA_START→connect, CONNECTED, GOT_IP, DISCONNECTED→retry).
+3. [ ] Event group: `app_main` espera o IP de forma limpa.
+4. [ ] SNTP (`esp_netif_sntp_*`, servidor `pool.ntp.org`) — também assíncrono (esperar o sync).
+5. [ ] Timezone SP: `setenv("TZ", ...)` + `tzset()` + `localtime_r` + `strftime`. **SP não tem mais horário de verão** (abolido 2019) → TZ string simples, SEM regra de DST.
+6. [ ] Juntar com o LCD: mostrar HH:MM:SS, atualizando.
+
+## Decisões já tomadas
+- SSID/senha via **Kconfig/menuconfig** (FEITO): `main/Kconfig.projbuild` define `CONFIG_WIFI_SSID` e `CONFIG_WIFI_PWD`. Default do PWD é placeholder (`Pwd@123`), senha real só no `sdkconfig` local.
+- **`sdkconfig` NÃO é versionado** (está no `.gitignore`) — cada máquina roda `menuconfig` p/ pôr a senha. ⚠️ Ao retomar de outra máquina: rodar `idf.py menuconfig` e preencher SSID/senha.
+- `main/CMakeLists.txt`: `REQUIRES lcd_i2c nvs_flash esp_wifi esp_netif esp_event` (FEITO).
+
+## Conceitos novos aprendidos nesta etapa
+- **Kconfig**: `main/Kconfig.projbuild` (sufixo `.projbuild` = aparece no topo do menuconfig). `config NOME` vira `CONFIG_NOME` no C via `sdkconfig.h` (auto-incluído). `menuconfig` salva no `sdkconfig`.
+- **Resolução de headers no IDF**: C não tem "imports"; `#include` é só texto. Um header só entra no caminho se o componente dele estiver no `REQUIRES`/`PRIV_REQUIRES`. Componentes "comuns" (`log`, `freertos`, `heap`...) são auto-incluídos; o resto (`nvs_flash`, `esp_wifi`...) você declara. Confie no `idf.py build`, não nos squigglies do editor (regenerar índice: `idf.py reconfigure`).
+- `nvs_flash_init`: tratar `ESP_ERR_NVS_NO_FREE_PAGES`/`ESP_ERR_NVS_NEW_VERSION_FOUND` → `nvs_flash_erase()` + re-init.
+
+## ⚠️ Pendências da Fundação (revisão pendente em `app_main`)
+- "Loga o erro e continua" nos `if (err != ESP_OK)` — decidir: usar `ESP_ERROR_CHECK` (fail-fast, recomendado) OU dar `return` após o log. Hoje cai pro próximo passo mesmo com erro.
+- O 2º `nvs_flash_init()` (após erase) não é checado.
+- Log de sucesso "Fundations complete" está preso no `else` do event loop (mente se netif falhar). Typo: "Fundations"→"Foundations".
+
+---
+
+# 🟡 FOCO ATUAL #2 (paralelo): feature `lcd_i2c_marquee` (texto rolando / "ticker")
+
+Define uma região de UMA linha do LCD (row, col_start..col_end) e rola um texto de qualquer
+tamanho dentro dela, em loop contínuo, a `n` casas/segundo. Mora no componente `lcd_i2c`
+(`components/lcd_i2c/src/marquee.c` + protótipos no `lcd_i2c.h`).
+
+## Arquitetura escolhida: Opção B — **task de fundo + mutex** (concorrência de verdade)
+- `marquee_create` faz `xTaskCreate` de uma task que rola pra sempre e retorna na hora.
+- **Mutex compartilhado**: o lock protege o RECURSO (o LCD), então NÃO pode ser privado do marquee —
+  a app cria UM mutex e passa pro marquee E usa nas próprias escritas. A task dá `Take`/`Give`
+  envolvendo o BLOCO inteiro (`set_cursor` + `print`), senão não é atômico.
+- **Shutdown limpo** (Fase 3): `volatile bool running` + done-semaphore; `delete` para a task e ESPERA
+  ela sair antes de `free` (senão use-after-free). Liberar na ordem inversa.
+
+## Plano incremental
+- **Fase 1 (EM ANDAMENTO):** `create` + `marquee_task` rolando pra sempre (SEM mutex, SEM delete). Ver funcionar.
+- **Fase 2:** mutex compartilhado; `app_main` escreve em outra linha p/ provar a corrida (sem lock corrompe, com lock fica limpo).
+- **Fase 3:** `set_text` (troca de texto sob o mutex) + `delete` limpo.
+
+## Contrato de API (Opção B)
+```c
+typedef struct lcd_i2c_marquee_t *lcd_i2c_marquee_handle_t;   // handle OPACO (ponteiro!)
+esp_err_t lcd_i2c_marquee_create(lcd_i2c_handle_t lcd, SemaphoreHandle_t lcd_mutex,
+                                 uint8_t row, uint8_t col_start, uint8_t col_end,
+                                 uint8_t chars_per_sec, const char *initial_text,
+                                 lcd_i2c_marquee_handle_t *out);
+esp_err_t lcd_i2c_marquee_set_text(lcd_i2c_marquee_handle_t m, const char *text);
+esp_err_t lcd_i2c_marquee_delete(lcd_i2c_marquee_handle_t m);
+```
+
+## Algoritmo do scroll
+- `W` = `col_end - col_start + 1` (largura da janela). `SB` = texto + separador (`MARQUEE_GAP`=3 espaços), comprimento `M = strlen(texto)+GAP`.
+- Offset `o` em 0..M-1. Janela = `SB[(o+k) % M]` p/ k=0..W-1; posições `>= strlen` viram espaço (o gap).
+- Desenhar: `set_cursor(col_start,row)` UMA vez + escrever W chars. Avançar `o=(o+1)%M`. `vTaskDelay(period_ms)`, `period_ms=1000/chars_per_sec`.
+- Só redesenhar quando o offset muda. Buffer local `char win[W+1]` terminado em `\0`.
+
+## Passos do `create` (idioma C: alocar em etapas + cleanup em cascata)
+1. Validar args → `ESP_ERR_INVALID_ARG`. 2. `calloc` do handle (zera tudo) → `ESP_ERR_NO_MEM`.
+3. Copiar texto (`malloc`+`strcpy`), cleanup do handle se falhar. 4. Preencher campos escalares.
+5. **`xTaskCreate` POR ÚLTIMO** (a task começa a rodar já; struct tem que estar pronto), cleanup se `!= pdPASS`.
+6. `*out = m; return ESP_OK;`
+
+## ⚠️ Pendências do marquee.c (Fase 1 incompleta — corrigir ao retomar)
+- Faltam `;`: nos campos do struct (`scroll_len`, `offset`) e no `malloc` do `m->text`.
+- **Typedef do handle errado**: hoje typedef'a a própria struct como `lcd_i2c_marquee_handle_t`. O correto (handle opaco) é `typedef struct lcd_i2c_marquee_t *lcd_i2c_marquee_handle_t;` no HEADER, e o `.c` usa `struct lcd_i2c_marquee_t *m`.
+- `strcpy` invertido e com `&`: deve ser `strcpy(m->text, initial_text)` (dest, src), sem `&`. Falta `#include <string.h>`.
+- Validações de NULL (lcd/out/initial_text) logam mas NÃO dão `return ESP_ERR_INVALID_ARG` — caem adiante.
+- `create` incompleto: faltam passo 5 (`xTaskCreate`) e 6 (`*out`/`return`); a função `marquee_task` ainda não existe.
+- Header (`lcd_i2c.h`): protótipo usa `lcd_i2c_marquee_t *out` (tipo não declarado) e falta `;` no fim; falta o typedef do handle e `#include "freertos/semphr.h"` (p/ `SemaphoreHandle_t`).
+
+---
+
+# ⏸️ ADIADO: driver INA228 (monitor de corrente/potência I2C)
+Retomar quando tiver o chip. Reaproveita o padrão de driver (handle opaco + bus injetado + create/delete + esp_err_t).
+NOVO seria: registradores via `i2c_master_transmit_receive`, dados multi-byte big-endian, raw→unidade física
+(LSB/escala, `SHUNT_CAL`), complemento de dois. 1º passo: ler `MANUFACTURER_ID` (0x3E, deve dar "TI").
 
 ## Convenção mantida
-Modo "professor": o aluno escreve TODO o código; Claude só ensina/revisa. Ver memória local.
+Modo "professor": o aluno escreve TODO o código; Claude só ensina/revisa.

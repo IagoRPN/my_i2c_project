@@ -1,8 +1,11 @@
 #include "driver/i2c_master.h"
 #include "lcd_i2c.h"
 #include "esp_log.h"
+#include "nvs_flash.h"
+#include "esp_netif.h"
+#include "esp_event.h"
 
-#define TAG "I2C_SCAN"
+#define TAG "WIFI"
 
 void scan_i2c_bus(i2c_master_bus_handle_t bus){
     ESP_LOGI(TAG, "Starting scanning on i2c bus...");
@@ -19,7 +22,30 @@ void scan_i2c_bus(i2c_master_bus_handle_t bus){
 
 void app_main(void)
 {
-    i2c_master_bus_config_t bus_cfg = {
+    
+    esp_err_t err  = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NEW_VERSION_FOUND || err == ESP_ERR_NVS_NO_FREE_PAGES){
+        nvs_flash_erase();
+        nvs_flash_init();
+    }
+    err = esp_netif_init();
+    if (err != ESP_OK){
+        ESP_LOGE(TAG, "failed to init netif");
+    }
+    err = esp_event_loop_create_default();
+    if (err != ESP_OK){
+        ESP_LOGE(TAG, "failed to create event loop");
+    }
+    else {
+        ESP_LOGI(TAG, "WiFi Fundations complete");
+    }
+
+}
+
+/*
+Lesso 1 - Hello World on LCD I2C from scratch
+
+i2c_master_bus_config_t bus_cfg = {
         .clk_source                   = I2C_CLK_SRC_DEFAULT,
         .i2c_port                     = I2C_NUM_0,   //ESP32-S3 POSSUI 2 CONTROLADORES: 0 E 1
         .sda_io_num                   = GPIO_NUM_14, //PINO LIGADO AO SDA
@@ -44,6 +70,5 @@ void app_main(void)
     lcd_i2c_print(lcd, "Hello");
     lcd_i2c_set_cursor(lcd, 0, 1);
     lcd_i2c_print(lcd, "World!");
-    
 
-}
+*/

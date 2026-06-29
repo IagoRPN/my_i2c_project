@@ -1,0 +1,14 @@
+menu "Minha Config WiFi"
+
+    config WIFI_SSID
+        string "WiFi SSID"
+        default "meu_ssid"
+        help
+            SSID da rede WiFi a conectar
+    
+    config WIFI_PWD
+        string "Senha do WiFi"
+        default "Pwd@123"
+        help
+            Senha da rede WiFi a conectar
+endmenu
