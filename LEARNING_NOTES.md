@@ -112,9 +112,13 @@ tamanho dentro dela, em loop contínuo, a `n` casas/segundo. Mora no componente 
   ela sair antes de `free` (senão use-after-free). Liberar na ordem inversa.
 
 ## Plano incremental
-- **Fase 1 (EM ANDAMENTO):** `create` + `marquee_task` rolando pra sempre (SEM mutex, SEM delete). Ver funcionar.
-- **Fase 2:** mutex compartilhado; `app_main` escreve em outra linha p/ provar a corrida (sem lock corrompe, com lock fica limpo).
-- **Fase 3:** `set_text` (troca de texto sob o mutex) + `delete` limpo.
+- **Fase 1 — ✅ FEITA:** `create` + `marquee_task` rolando pra sempre. Texto rola na tela.
+- **Fase 2 — ✅ FEITA:** mutex compartilhado. Provada a corrida (sem lock corrompe; com lock limpo, mesmo
+  com `vTaskDelay(10)` artificial entre `set_cursor` e `print` pra alargar a janela). Lição central:
+  o mutex é uma CONVENÇÃO — só protege se TODOS pegarem o MESMO bastão (bug clássico: passar NULL pro
+  marquee e criar o mutex depois → só um lado travava → corrompia).
+- **Fase 3a — 🟡 PRÓXIMA (implementar de outro PC):** `delete` limpo (parar a task sem use-after-free).
+- **Fase 3b — ⬜ depois:** `set_text` (trocar o texto em tempo real, sob lock).
 
 ## Contrato de API (Opção B)
 ```c
@@ -139,13 +143,44 @@ esp_err_t lcd_i2c_marquee_delete(lcd_i2c_marquee_handle_t m);
 5. **`xTaskCreate` POR ÚLTIMO** (a task começa a rodar já; struct tem que estar pronto), cleanup se `!= pdPASS`.
 6. `*out = m; return ESP_OK;`
 
-## ⚠️ Pendências do marquee.c (Fase 1 incompleta — corrigir ao retomar)
-- Faltam `;`: nos campos do struct (`scroll_len`, `offset`) e no `malloc` do `m->text`.
-- **Typedef do handle errado**: hoje typedef'a a própria struct como `lcd_i2c_marquee_handle_t`. O correto (handle opaco) é `typedef struct lcd_i2c_marquee_t *lcd_i2c_marquee_handle_t;` no HEADER, e o `.c` usa `struct lcd_i2c_marquee_t *m`.
-- `strcpy` invertido e com `&`: deve ser `strcpy(m->text, initial_text)` (dest, src), sem `&`. Falta `#include <string.h>`.
-- Validações de NULL (lcd/out/initial_text) logam mas NÃO dão `return ESP_ERR_INVALID_ARG` — caem adiante.
-- `create` incompleto: faltam passo 5 (`xTaskCreate`) e 6 (`*out`/`return`); a função `marquee_task` ainda não existe.
-- Header (`lcd_i2c.h`): protótipo usa `lcd_i2c_marquee_t *out` (tipo não declarado) e falta `;` no fim; falta o typedef do handle e `#include "freertos/semphr.h"` (p/ `SemaphoreHandle_t`).
+## ⚠️ ANTES de começar a Fase 3a: limpeza pendente
+- Remover do `marquee_task` o `vTaskDelay(pdMS_TO_TICKS(10))` que está ENTRE o `set_cursor` e o
+  `print` — era só pra revelar a corrida na Fase 2. Sem ele o scroll volta a ficar fluido.
+
+## 🎯 Fase 3a — `delete` limpo (RETOMAR AQUI)
+**Problema:** `vTaskDelete(task)` + `free(m)` cru é perigoso pois a task roda em paralelo:
+(1) use-after-free — a task pode estar lendo `m->text`/`m->lcd` quando der `free`;
+(2) se matar a task enquanto ela SEGURA o mutex do LCD, o bastão nunca volta → deadlock no app_main.
+`vTaskDelete` de outra task é abrupto/assíncrono — não controla EM QUE PONTO ela morre.
+
+**Solução: shutdown cooperativo (pedir → esperar → liberar).**
+1. Campos novos na struct: `volatile bool running;` (volatile pq outra task altera) + `SemaphoreHandle_t done;`.
+2. `create`: `m->running = true;` e `m->done = xSemaphoreCreateBinary();` (checar NULL → cleanup text+m).
+3. `marquee_task`: trocar `while(1)` por `while (m->running)`. APÓS o loop:
+   `xSemaphoreGive(m->done); vTaskDelete(NULL);` (a task se autodeleta e dá o "recibo").
+4. `lcd_i2c_marquee_delete(m)`:
+   ```c
+   if (m == NULL) return ESP_ERR_INVALID_ARG;
+   m->running = false;                     // pede pra parar
+   xSemaphoreTake(m->done, portMAX_DELAY); // ESPERA a task confirmar que saiu
+   vSemaphoreDelete(m->done);
+   free(m->text); free(m);                 // seguro agora; ordem inversa da alocação
+   return ESP_OK;
+   ```
+**Ownership (regra de ouro):** liberar SÓ o que o marquee alocou — `m->done`, `m->text`, `m`.
+NÃO liberar `m->mutex` nem `m->lcd` (são do app_main; quem aloca, libera).
+**Declarar `lcd_i2c_marquee_delete` no header** (já está no contrato de API acima).
+**Teste no main:** `vTaskDelay(8000)` → `lcd_i2c_marquee_delete(mq)` → `lcd_i2c_clear` + print "parado ok".
+Sucesso = texto congela, tela limpa, sem panic/reboot.
+
+**Pergunta em aberto (responder ao retomar):** por que, após `m->running=false`, a task pode levar até
+~1 `period_ms` pra sair? E por que `delete` não pode dar `free(m)` logo após setar a flag?
+
+## ⬜ Fase 3b — `set_text` (depois da 3a)
+Trocar o texto em runtime. Cuidado: `m->text` é lido pela task → a troca (alocar novo buffer, copiar,
+recalcular `scroll_len`, trocar o ponteiro, liberar o antigo) precisa ser protegida. Detalhe a resolver:
+hoje `text_len` é calculado UMA vez fora do loop da task → ao trocar o texto fica stale. Opções: recalcular
+`strlen` dentro do loop, ou guardar `text_len` na struct e atualizar junto na troca, tudo sob lock.
 
 ---
 

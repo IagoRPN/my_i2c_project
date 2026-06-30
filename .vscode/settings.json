@@ -1,23 +1,33 @@
 {
-    "idf.espIdfPathWin": "C:/Espressif/frameworks/esp-idf-v5.5.4",
-    "idf.toolsPathWin": "C:/Espressif",
-    "idf.pythonBinPathWin": "C:/Espressif/python_env/idf5.5_py3.11_env/Scripts/python.exe",
-    "idf.gitPathWin": "C:/Espressif/tools/idf-git/2.44.0/cmd/git.exe",
-    "idf.portWin": "COM6",
-    "idf.flashType": "UART",
-
-    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
-    "C_Cpp.default.compilerPath": "C:/Espressif/tools/xtensa-esp-elf/esp-14.2.0_20260121/xtensa-esp-elf/bin/xtensa-esp32-elf-gcc.exe",
-    "C_Cpp.intelliSenseEngine": "default",
-    "C_Cpp.errorSquiggles": "disabled",
-    "C_Cpp.autocomplete": "default",
-    "C_Cpp.suggestSnippets": false,
-
-    "github.copilot.enable": {
-        "*": false
-    },
-    "idf.currentSetup": "C:/Espressif/frameworks/esp-idf-v5.5.4/",
-    "idf.openOcdConfigs": [
-        "board/esp32s3-builtin.cfg"
-    ]
+  "idf.espIdfPathWin": "C:/Espressif/frameworks/esp-idf-v5.5.4",
+  "idf.toolsPathWin": "C:/Espressif",
+  "idf.pythonBinPathWin": "C:/Espressif/python_env/idf5.5_py3.11_env/Scripts/python.exe",
+  "idf.gitPathWin": "C:/Espressif/tools/idf-git/2.44.0/cmd/git.exe",
+  "idf.portWin": "COM6",
+  "idf.flashType": "UART",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+  "C_Cpp.default.compilerPath": "C:/Espressif/tools/xtensa-esp-elf/esp-14.2.0_20260121/xtensa-esp-elf/bin/xtensa-esp32-elf-gcc.exe",
+  "C_Cpp.intelliSenseEngine": "default",
+  "C_Cpp.errorSquiggles": "disabled",
+  "C_Cpp.autocomplete": "default",
+  "C_Cpp.suggestSnippets": false,
+  "github.copilot.enable": {
+    "*": false
+  },
+  "idf.currentSetup": "C:\\Espressif\\v5.5.4\\frameworks\\esp-idf-v5.5.4",
+  "idf.openOcdConfigs": [
+    "board/esp32s3-builtin.cfg"
+  ],
+  "idf.customExtraVars": {
+    "OPENOCD_SCRIPTS": "C:\\Espressif\\tools\\openocd-esp32\\v0.12.0-esp32-20230921/openocd-esp32/share/openocd/scripts",
+    "IDF_CCACHE_ENABLE": "1",
+    "ESP_ROM_ELF_DIR": "C:\\Espressif\\tools\\esp-rom-elfs\\20230320/",
+    "IDF_TARGET": "esp32s3"
+  },
+  "clangd.path": "C:\\Espressif\\v5.5.4\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=c:\\esp_workspace\\my_lcd_i2c_project\\build"
+  ]
 }
