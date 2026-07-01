@@ -72,18 +72,37 @@ nvs_flash_init → esp_netif_init → esp_event_loop_create_default
 → esp_wifi_set_mode(WIFI_MODE_STA) → esp_wifi_set_config → esp_wifi_start
 ```
 
-## ⏸️ STATUS: FOCO #1 EM PAUSA (priorizando o marquee, FOCO #2).
-O `app_main` foi repurposado pro demo do marquee — a fundação WiFi (NVS/netif/event loop) foi
-REMOVIDA do `app_main`. Ao voltar pro relógio NTP, recolocar a fundação (os includes wifi/netif/
-event ainda estão lá, mas sem uso). Retomar pelo Roadmap abaixo.
+## 🟢 STATUS: FOCO #1 ATIVO. `app_main` = fundação/conexão WiFi.
+O demo do marquee foi removido do `app_main` (preservado no bloco comentado no fim do `.c`). Boot WiFi
+sendo construído em passos 2a/2b/2c. **Retomar no passo 2c (marcado 🎯 abaixo).**
 
 ## Roadmap
-1. [ ] **Fundação de boot** (NVS + netif + event loop) — tinha sido escrita, mas SAIU do app_main; refazer.
-2. [ ] Sequência WiFi + handlers (4 eventos: STA_START→connect, CONNECTED, GOT_IP, DISCONNECTED→retry).
-3. [ ] Event group: `app_main` espera o IP de forma limpa.
-4. [ ] SNTP (`esp_netif_sntp_*`, servidor `pool.ntp.org`) — também assíncrono (esperar o sync).
-5. [ ] Timezone SP: `setenv("TZ", ...)` + `tzset()` + `localtime_r` + `strftime`. **SP não tem mais horário de verão** (abolido 2019) → TZ string simples, SEM regra de DST.
-6. [ ] Juntar com o LCD: mostrar HH:MM:SS, atualizando.
+1.  [x] **Fundação de boot** (NVS + netif + event loop) — refeita com fail-fast (`ESP_ERROR_CHECK`, tratando os 2 erros especiais do NVS). Log "WiFi Foundation complete".
+2a. [x] **Subir driver:** `esp_netif_create_default_wifi_sta()` + `esp_wifi_init(WIFI_INIT_CONFIG_DEFAULT())` + `esp_wifi_set_mode(WIFI_MODE_STA)`.
+2b. [x] **Event group + handler:** `s_wifi_events` (bits CONNECTED=BIT0, FAIL=BIT1) + `wifi_event_handler` com 3 casos — STA_START→`esp_wifi_connect`; DISCONNECTED→retry até 5x, senão seta FAIL_BIT; GOT_IP→zera retry, seta CONNECTED_BIT, loga `" IPSTR"`+`IP2STR`. Registrado nas 2 famílias (`WIFI_EVENT`/ANY_ID e `IP_EVENT`/GOT_IP). Include `freertos/event_groups.h`.
+2c. [ ] 🎯 **RETOMAR AQUI:** falta (i) `esp_wifi_set_config(WIFI_IF_STA, &wifi_config)` com SSID/PWD do Kconfig **ANTES** do start; (ii) `xEventGroupWaitBits(CONNECTED|FAIL, pdFALSE, pdFALSE, portMAX_DELAY)` na `app_main` p/ esperar o resultado. **Hoje `esp_wifi_start()` é chamado SEM `set_config` → ainda NÃO conecta.**
+3.  [ ] SNTP (`esp_netif_sntp_*`, servidor `pool.ntp.org`) — também assíncrono (esperar o sync).
+4.  [ ] Timezone SP: `setenv("TZ", ...)` + `tzset()` + `localtime_r` + `strftime`. **SP não tem mais horário de verão** (abolido 2019) → TZ string simples, SEM regra de DST.
+5.  [ ] Juntar com o LCD (reintegrar o marquee): mostrar HH:MM:SS, atualizando.
+
+## 🎯 Detalhes do passo 2c (RETOMAR)
+```c
+// (1) ANTES do esp_wifi_start(): config com SSID/senha do Kconfig
+wifi_config_t wifi_config = {
+    .sta = {
+        .ssid = CONFIG_WIFI_SSID,
+        .password = CONFIG_WIFI_PWD,
+        .threshold.authmode = WIFI_AUTH_WPA2_PSK,   // opcional
+    },
+};
+ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+ESP_ERROR_CHECK(esp_wifi_start());
+// (2) esperar (ponte async→síncrono):
+EventBits_t bits = xEventGroupWaitBits(s_wifi_events,
+    WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+// bits & CONNECTED_BIT → sucesso; bits & FAIL_BIT → falhou (senha/SSID)
+```
+Sucesso no monitor: `Wifi STA inicializado` → `got IP: 192.168.x.y` → `conectado com sucesso!`.
 
 ## Decisões já tomadas
 - SSID/senha via **Kconfig/menuconfig** (FEITO): `main/Kconfig.projbuild` define `CONFIG_WIFI_SSID` e `CONFIG_WIFI_PWD`. Default do PWD é placeholder (`Pwd@123`), senha real só no `sdkconfig` local.
@@ -95,8 +114,7 @@ event ainda estão lá, mas sem uso). Retomar pelo Roadmap abaixo.
 - **Resolução de headers no IDF**: C não tem "imports"; `#include` é só texto. Um header só entra no caminho se o componente dele estiver no `REQUIRES`/`PRIV_REQUIRES`. Componentes "comuns" (`log`, `freertos`, `heap`...) são auto-incluídos; o resto (`nvs_flash`, `esp_wifi`...) você declara. Confie no `idf.py build`, não nos squigglies do editor (regenerar índice: `idf.py reconfigure`).
 - `nvs_flash_init`: tratar `ESP_ERR_NVS_NO_FREE_PAGES`/`ESP_ERR_NVS_NEW_VERSION_FOUND` → `nvs_flash_erase()` + re-init.
 
-## ⚠️ Lições da Fundação (aplicar ao refazer o boot WiFi)
-Quando a fundação existia no `app_main`, tinha estes problemas — corrigir na reescrita:
+## ✅ Lições da Fundação (JÁ APLICADAS na reescrita)
 - "Loga o erro e continua" nos `if (err != ESP_OK)` — usar `ESP_ERROR_CHECK` (fail-fast, recomendado) OU dar `return` após o log. Não cair pro próximo passo com erro.
 - Checar o 2º `nvs_flash_init()` (após erase).
 - Não prender o log de sucesso no `else` de uma só chamada. Typo: "Fundations"→"Foundations".
