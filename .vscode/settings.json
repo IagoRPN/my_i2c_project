@@ -24,10 +24,10 @@
     "ESP_ROM_ELF_DIR": "C:\\Espressif\\tools\\esp-rom-elfs\\20230320/",
     "IDF_TARGET": "esp32s3"
   },
-  "clangd.path": "C:\\Espressif\\v5.5.4\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
+  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=c:\\esp_workspace\\my_lcd_i2c_project\\build"
+    "--compile-commands-dir=c:\\esp_workspace\\my_i2c_project\\build"
   ]
 }

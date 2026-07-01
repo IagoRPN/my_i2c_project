@@ -23,12 +23,14 @@ struct lcd_i2c_marquee_t {
     size_t offset;
     TaskHandle_t task;
     SemaphoreHandle_t mutex;
+    volatile bool running;
+    SemaphoreHandle_t done;
 };
 
 static void marquee_task(void *arg){
     lcd_i2c_marquee_handle_t m = (lcd_i2c_marquee_handle_t) arg;
     size_t text_len = strlen(m->text);
-    while (1){
+    while (m->running){
         char win[m->width + 1];
         for (uint8_t k = 0; k < m->width; k++){
             size_t idx = (m->offset + k) % m->scroll_len;
@@ -44,6 +46,18 @@ static void marquee_task(void *arg){
         vTaskDelay(pdMS_TO_TICKS(m->period_ms));
         
     }
+    xSemaphoreGive(m->done);
+    vTaskDelete(NULL);
+}
+
+esp_err_t lcd_i2c_marquee_delete(lcd_i2c_marquee_handle_t m){
+    if (m == NULL) return ESP_ERR_INVALID_ARG;
+    m->running = false;
+    xSemaphoreTake(m->done, portMAX_DELAY);
+    vSemaphoreDelete(m->done);
+    free(m->text);
+    free(m);
+    return ESP_OK;
 }
 
 esp_err_t lcd_i2c_marquee_create(lcd_i2c_handle_t lcd,                     SemaphoreHandle_t lcd_mutex, uint8_t row, uint8_t col_start, uint8_t col_end, uint8_t chars_per_sec, const char *initial_text, lcd_i2c_marquee_handle_t *out ){
@@ -85,10 +99,18 @@ esp_err_t lcd_i2c_marquee_create(lcd_i2c_handle_t lcd,                     Semap
     m->period_ms = 1000/ chars_per_sec;
     m->scroll_len = strlen(m->text) + MARQUEE_GAP;
     m->mutex = lcd_mutex;
+    m->running = true;
+    m->done = xSemaphoreCreateBinary();
+    if (m->done == NULL){
+        free(m->text);
+        free(m);
+        return ESP_ERR_NO_MEM;
+    }
 
     BaseType_t ok = xTaskCreate(marquee_task, "marquee", 4096, m, 5, &m->task);
     if (ok != pdPASS){
         free(m->text);
+        free(m->done);
         free(m);
         return ESP_ERR_NO_MEM;
     }

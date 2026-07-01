@@ -72,8 +72,13 @@ nvs_flash_init → esp_netif_init → esp_event_loop_create_default
 → esp_wifi_set_mode(WIFI_MODE_STA) → esp_wifi_set_config → esp_wifi_start
 ```
 
+## ⏸️ STATUS: FOCO #1 EM PAUSA (priorizando o marquee, FOCO #2).
+O `app_main` foi repurposado pro demo do marquee — a fundação WiFi (NVS/netif/event loop) foi
+REMOVIDA do `app_main`. Ao voltar pro relógio NTP, recolocar a fundação (os includes wifi/netif/
+event ainda estão lá, mas sem uso). Retomar pelo Roadmap abaixo.
+
 ## Roadmap
-1. [~] **Fundação de boot** (NVS + netif + event loop) — escrito, FALTA REVISAR (ver pendências).
+1. [ ] **Fundação de boot** (NVS + netif + event loop) — tinha sido escrita, mas SAIU do app_main; refazer.
 2. [ ] Sequência WiFi + handlers (4 eventos: STA_START→connect, CONNECTED, GOT_IP, DISCONNECTED→retry).
 3. [ ] Event group: `app_main` espera o IP de forma limpa.
 4. [ ] SNTP (`esp_netif_sntp_*`, servidor `pool.ntp.org`) — também assíncrono (esperar o sync).
@@ -90,10 +95,11 @@ nvs_flash_init → esp_netif_init → esp_event_loop_create_default
 - **Resolução de headers no IDF**: C não tem "imports"; `#include` é só texto. Um header só entra no caminho se o componente dele estiver no `REQUIRES`/`PRIV_REQUIRES`. Componentes "comuns" (`log`, `freertos`, `heap`...) são auto-incluídos; o resto (`nvs_flash`, `esp_wifi`...) você declara. Confie no `idf.py build`, não nos squigglies do editor (regenerar índice: `idf.py reconfigure`).
 - `nvs_flash_init`: tratar `ESP_ERR_NVS_NO_FREE_PAGES`/`ESP_ERR_NVS_NEW_VERSION_FOUND` → `nvs_flash_erase()` + re-init.
 
-## ⚠️ Pendências da Fundação (revisão pendente em `app_main`)
-- "Loga o erro e continua" nos `if (err != ESP_OK)` — decidir: usar `ESP_ERROR_CHECK` (fail-fast, recomendado) OU dar `return` após o log. Hoje cai pro próximo passo mesmo com erro.
-- O 2º `nvs_flash_init()` (após erase) não é checado.
-- Log de sucesso "Fundations complete" está preso no `else` do event loop (mente se netif falhar). Typo: "Fundations"→"Foundations".
+## ⚠️ Lições da Fundação (aplicar ao refazer o boot WiFi)
+Quando a fundação existia no `app_main`, tinha estes problemas — corrigir na reescrita:
+- "Loga o erro e continua" nos `if (err != ESP_OK)` — usar `ESP_ERROR_CHECK` (fail-fast, recomendado) OU dar `return` após o log. Não cair pro próximo passo com erro.
+- Checar o 2º `nvs_flash_init()` (após erase).
+- Não prender o log de sucesso no `else` de uma só chamada. Typo: "Fundations"→"Foundations".
 
 ---
 
@@ -117,8 +123,9 @@ tamanho dentro dela, em loop contínuo, a `n` casas/segundo. Mora no componente 
   com `vTaskDelay(10)` artificial entre `set_cursor` e `print` pra alargar a janela). Lição central:
   o mutex é uma CONVENÇÃO — só protege se TODOS pegarem o MESMO bastão (bug clássico: passar NULL pro
   marquee e criar o mutex depois → só um lado travava → corrompia).
-- **Fase 3a — 🟡 PRÓXIMA (implementar de outro PC):** `delete` limpo (parar a task sem use-after-free).
-- **Fase 3b — ⬜ depois:** `set_text` (trocar o texto em tempo real, sob lock).
+- **Fase 3a — ✅ FEITA:** `delete` cooperativo (running=false → Take(done) → vSemaphoreDelete → free text+m).
+  Testado: texto congela, tela limpa, sem panic. Shutdown limpo confirmado.
+- **Fase 3b — 🟡 PRÓXIMA:** `set_text` (trocar o texto em tempo real, sob lock).
 
 ## Contrato de API (Opção B)
 ```c
@@ -143,11 +150,29 @@ esp_err_t lcd_i2c_marquee_delete(lcd_i2c_marquee_handle_t m);
 5. **`xTaskCreate` POR ÚLTIMO** (a task começa a rodar já; struct tem que estar pronto), cleanup se `!= pdPASS`.
 6. `*out = m; return ESP_OK;`
 
-## ⚠️ ANTES de começar a Fase 3a: limpeza pendente
-- Remover do `marquee_task` o `vTaskDelay(pdMS_TO_TICKS(10))` que está ENTRE o `set_cursor` e o
-  `print` — era só pra revelar a corrida na Fase 2. Sem ele o scroll volta a ficar fluido.
+## ✅ Limpeza da Fase 2: FEITA
+- O `vTaskDelay(pdMS_TO_TICKS(10))` artificial entre `set_cursor` e `print` (usado pra revelar a
+  corrida) já foi removido. `create()` está completo e correto; task usa o mutex. Scroll fluido.
+- Estado atual do demo (`app_main`): bus I2C + LCD + `marquee_create` (região row0, col 8..14, 5 c/s)
+  + loop escrevendo "cnt: N" na linha 1 sob o MESMO mutex. Fase 1+2 provadas e commitadas.
 
-## 🎯 Fase 3a — `delete` limpo (RETOMAR AQUI)
+## ✅ Fase 3a — `delete` limpo (CONCLUÍDA)
+
+### Lições da depuração (guardar)
+- **Bug do double-free:** `delete(mq)` foi chamado DENTRO de um `while(1)` → 2ª volta operou sobre handle
+  já liberado. Sintoma: panic `assert failed: xQueueSemaphoreTake ... (pxQueue->uxItemSize == 0)` no
+  `xSemaphoreTake(m->done)` — o `done` lido de memória liberada não era mais um semáforo válido.
+  Regra: `delete` é operação ÚNICA, fica FORA de loop.
+- Ler backtrace de baixo p/ cima (quem chamou quem); `vSemaphoreDelete` (não `free`) p/ objetos FreeRTOS;
+  `vTaskDelay(N)` é em TICKS — usar `pdMS_TO_TICKS(N)`.
+
+### Decisão de design (deliberada)
+- `marquee_delete` **NÃO limpa** a região no LCD (deixa o último frame). Motivos: `lcd_i2c_clear` apagaria
+  a tela INTEIRA (mataria o relógio da outra linha); limpar só a região seria política de apresentação que
+  o chamador pode não querer. Se um dia quiser, opção preferida = flag `clear_region` no delete, limpando
+  só `width` espaços em `col_start/row`, SOB o mutex, entre o `Take(done)` e o `free`.
+
+### (Referência) plano que foi seguido
 **Problema:** `vTaskDelete(task)` + `free(m)` cru é perigoso pois a task roda em paralelo:
 (1) use-after-free — a task pode estar lendo `m->text`/`m->lcd` quando der `free`;
 (2) se matar a task enquanto ela SEGURA o mutex do LCD, o bastão nunca volta → deadlock no app_main.

@@ -31,3 +31,4 @@ esp_err_t lcd_i2c_print(lcd_i2c_handle_t lcd, const char *str);
 esp_err_t lcd_i2c_write_char(lcd_i2c_handle_t lcd, char c);
 esp_err_t lcd_i2c_set_backlight(lcd_i2c_handle_t lcd, bool on);
 esp_err_t lcd_i2c_marquee_create(lcd_i2c_handle_t lcd, SemaphoreHandle_t lcd_mutex,uint8_t row, uint8_t col_start, uint8_t col_end, uint8_t chars_per_sec, const char *initial_text, lcd_i2c_marquee_handle_t *out );
+esp_err_t lcd_i2c_marquee_delete(lcd_i2c_marquee_handle_t m);

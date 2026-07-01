@@ -59,16 +59,10 @@ void app_main(void)
 
     
 
-    char buf[17];
-    int n = 0;
-    while (1){
-        snprintf(buf, sizeof buf, "cnt: %d", n++);
-        xSemaphoreTake(lcd_mutex, portMAX_DELAY);
-        lcd_i2c_set_cursor(lcd, 0, 1);
-        lcd_i2c_print(lcd, buf);
-        xSemaphoreGive(lcd_mutex);
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
+    vTaskDelay(pdMS_TO_TICKS(8000));
+    lcd_i2c_marquee_delete(mq);
+    lcd_i2c_clear(lcd);
+    
 
 }
 
