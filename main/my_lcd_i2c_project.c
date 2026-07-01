@@ -53,17 +53,20 @@ void app_main(void)
     SemaphoreHandle_t lcd_mutex = xSemaphoreCreateMutex();
     
     lcd_i2c_marquee_handle_t mq;
+    lcd_i2c_marquee_handle_t mq_2;
     ESP_ERROR_CHECK(lcd_i2c_marquee_create(
         lcd, lcd_mutex, 0, 8, 14, 5, "Texto rolando no LCD com ESP32-S3", &mq
     ));
-
+    ESP_ERROR_CHECK(lcd_i2c_marquee_create(
+        lcd, lcd_mutex, 1, 7, 14, 5, "Outro texto aqui", &mq_2
+    ));
     
 
     vTaskDelay(pdMS_TO_TICKS(8000));
-    lcd_i2c_marquee_delete(mq);
-    lcd_i2c_clear(lcd);
     
+    ESP_ERROR_CHECK(lcd_i2c_marquee_set_text(mq, "Novo texto agora"));
 
+    
 }
 
 /*

@@ -125,7 +125,13 @@ tamanho dentro dela, em loop contínuo, a `n` casas/segundo. Mora no componente 
   marquee e criar o mutex depois → só um lado travava → corrompia).
 - **Fase 3a — ✅ FEITA:** `delete` cooperativo (running=false → Take(done) → vSemaphoreDelete → free text+m).
   Testado: texto congela, tela limpa, sem panic. Shutdown limpo confirmado.
-- **Fase 3b — 🟡 PRÓXIMA:** `set_text` (trocar o texto em tempo real, sob lock).
+- **Fase 3b — ✅ FEITA:** `set_text` (troca em runtime, sob lock). Testado: troca sem travar/crashar.
+  Lições: (1) alocar o buffer novo ANTES de liberar o antigo (exception safety); (2) toda leitura de
+  `m->text`/`offset`/`scroll_len` na task foi movida pra DENTRO do lock (antes a leitura do texto ficava
+  fora → use-after-free/OOB latente); (3) `text_len` derivado de `scroll_len - MARQUEE_GAP` a cada frame
+  (nunca stale) — cuidado com escopo em C: declarar a var DEPOIS do uso não retroage.
+
+## ✅ FEATURE MARQUEE COMPLETO (Fases 1→3b). Thread-safe, sem vazamento, sem crash.
 
 ## Contrato de API (Opção B)
 ```c

@@ -29,20 +29,24 @@ struct lcd_i2c_marquee_t {
 
 static void marquee_task(void *arg){
     lcd_i2c_marquee_handle_t m = (lcd_i2c_marquee_handle_t) arg;
-    size_t text_len = strlen(m->text);
+    
     while (m->running){
+        if (m->mutex) xSemaphoreTake(m->mutex, portMAX_DELAY);
+        size_t text_len = m->scroll_len - MARQUEE_GAP;
         char win[m->width + 1];
         for (uint8_t k = 0; k < m->width; k++){
             size_t idx = (m->offset + k) % m->scroll_len;
             win[k] = (idx < text_len) ? m->text[idx] : ' ';
+            
         }
         win[m->width] = '\0';
-        if (m->mutex) xSemaphoreTake(m->mutex, portMAX_DELAY);
+        
         lcd_i2c_set_cursor(m->lcd, m->col_start, m->row);
         
         lcd_i2c_print(m->lcd, win);
-        if (m->mutex) xSemaphoreGive(m->mutex);
         m->offset = (m->offset + 1) % m->scroll_len;
+        if (m->mutex) xSemaphoreGive(m->mutex);
+        
         vTaskDelay(pdMS_TO_TICKS(m->period_ms));
         
     }
@@ -115,6 +119,28 @@ esp_err_t lcd_i2c_marquee_create(lcd_i2c_handle_t lcd,                     Semap
         return ESP_ERR_NO_MEM;
     }
     *out = m;
+    return ESP_OK;
+}
+
+esp_err_t lcd_i2c_marquee_set_text(lcd_i2c_marquee_handle_t m, const char *text){
+    if (m == NULL){
+        ESP_LOGE(TAG, "lcd_i2c_marquee_handle can't be NULL");
+        return ESP_ERR_INVALID_ARG;
+
+    }
+     if (text == NULL){
+        ESP_LOGE(TAG, "text can't be NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+    char *novo = malloc(strlen(text) + 1);
+    if (!novo) return ESP_ERR_NO_MEM;
+    strcpy(novo, text);
+    if (m->mutex) xSemaphoreTake(m->mutex, portMAX_DELAY);
+    free(m->text);
+    m->text = novo;
+    m->scroll_len = strlen(novo) + MARQUEE_GAP;
+    m->offset = 0;
+    if (m->mutex) xSemaphoreGive(m->mutex);
     return ESP_OK;
 }
 
