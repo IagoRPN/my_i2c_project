@@ -74,7 +74,21 @@ void app_main(void)
     s_wifi_events = xEventGroupCreate();
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL));
+    
+    wifi_config_t wifi_cfg = { 0 };
+    strcpy( (char *)wifi_cfg.sta.ssid,  CONFIG_WIFI_SSID);
+    strcpy( (char *)wifi_cfg.sta.password,  CONFIG_WIFI_PWD);
+    
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
     ESP_ERROR_CHECK(esp_wifi_start());
+    EventBits_t bits = xEventGroupWaitBits(s_wifi_events, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdFALSE, pdFALSE, portMAX_DELAY );
+
+    if (bits & WIFI_CONNECTED_BIT){
+        ESP_LOGI(TAG, "Connected with success");
+
+    } else if (bits & WIFI_FAIL_BIT){
+        ESP_LOGE(TAG, "Connection Failed");
+    }
 }
 
 /*

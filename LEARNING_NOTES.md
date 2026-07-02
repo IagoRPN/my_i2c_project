@@ -72,37 +72,91 @@ nvs_flash_init → esp_netif_init → esp_event_loop_create_default
 → esp_wifi_set_mode(WIFI_MODE_STA) → esp_wifi_set_config → esp_wifi_start
 ```
 
-## 🟢 STATUS: FOCO #1 ATIVO. `app_main` = fundação/conexão WiFi.
+## 🟢 STATUS: FOCO #1 — WiFi CONECTANDO ✅. Próximo: refatorar em componente `wifi_sta`, depois SNTP.
 O demo do marquee foi removido do `app_main` (preservado no bloco comentado no fim do `.c`). Boot WiFi
-sendo construído em passos 2a/2b/2c. **Retomar no passo 2c (marcado 🎯 abaixo).**
+completo: passos 2a/2b/2c **FEITOS** — conectou de verdade (`got IP` + `Connected with success`).
+**Retomar criando o componente `wifi_sta` (ver seção "REFATORAÇÃO" abaixo).**
 
 ## Roadmap
 1.  [x] **Fundação de boot** (NVS + netif + event loop) — refeita com fail-fast (`ESP_ERROR_CHECK`, tratando os 2 erros especiais do NVS). Log "WiFi Foundation complete".
 2a. [x] **Subir driver:** `esp_netif_create_default_wifi_sta()` + `esp_wifi_init(WIFI_INIT_CONFIG_DEFAULT())` + `esp_wifi_set_mode(WIFI_MODE_STA)`.
 2b. [x] **Event group + handler:** `s_wifi_events` (bits CONNECTED=BIT0, FAIL=BIT1) + `wifi_event_handler` com 3 casos — STA_START→`esp_wifi_connect`; DISCONNECTED→retry até 5x, senão seta FAIL_BIT; GOT_IP→zera retry, seta CONNECTED_BIT, loga `" IPSTR"`+`IP2STR`. Registrado nas 2 famílias (`WIFI_EVENT`/ANY_ID e `IP_EVENT`/GOT_IP). Include `freertos/event_groups.h`.
-2c. [ ] 🎯 **RETOMAR AQUI:** falta (i) `esp_wifi_set_config(WIFI_IF_STA, &wifi_config)` com SSID/PWD do Kconfig **ANTES** do start; (ii) `xEventGroupWaitBits(CONNECTED|FAIL, pdFALSE, pdFALSE, portMAX_DELAY)` na `app_main` p/ esperar o resultado. **Hoje `esp_wifi_start()` é chamado SEM `set_config` → ainda NÃO conecta.**
+2c. [x] ✅ **FEITO — CONECTOU.** `esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg)` (SSID/PWD do Kconfig via `strcpy((char*)...)`) **ANTES** do start; `xEventGroupWaitBits(CONNECTED|FAIL, pdFALSE, pdFALSE, portMAX_DELAY)` + `if (bits & CONNECTED)`/`else if (FAIL)`. Testado num roteador real (ver "Lições do log real" abaixo).
+2.5 [ ] 🎯 **RETOMAR AQUI — REFATORAR:** extrair todo o WiFi do `app_main` p/ componente `wifi_sta` (ver seção dedicada). Fazer ANTES do SNTP (main pequeno = refator limpo).
 3.  [ ] SNTP (`esp_netif_sntp_*`, servidor `pool.ntp.org`) — também assíncrono (esperar o sync).
 4.  [ ] Timezone SP: `setenv("TZ", ...)` + `tzset()` + `localtime_r` + `strftime`. **SP não tem mais horário de verão** (abolido 2019) → TZ string simples, SEM regra de DST.
 5.  [ ] Juntar com o LCD (reintegrar o marquee): mostrar HH:MM:SS, atualizando.
 
-## 🎯 Detalhes do passo 2c (RETOMAR)
+## ✅ Passo 2c — como ficou (CONECTOU)
 ```c
-// (1) ANTES do esp_wifi_start(): config com SSID/senha do Kconfig
-wifi_config_t wifi_config = {
-    .sta = {
-        .ssid = CONFIG_WIFI_SSID,
-        .password = CONFIG_WIFI_PWD,
-        .threshold.authmode = WIFI_AUTH_WPA2_PSK,   // opcional
-    },
-};
-ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+wifi_config_t wifi_cfg = { 0 };
+strcpy((char *)wifi_cfg.sta.ssid, CONFIG_WIFI_SSID);       // cast (char*): sta.ssid é uint8_t[32]
+strcpy((char *)wifi_cfg.sta.password, CONFIG_WIFI_PWD);    // (ou usar designated initializer .ssid=...)
+ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));  // & obrigatório: API recebe PONTEIRO
 ESP_ERROR_CHECK(esp_wifi_start());
-// (2) esperar (ponte async→síncrono):
 EventBits_t bits = xEventGroupWaitBits(s_wifi_events,
     WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
-// bits & CONNECTED_BIT → sucesso; bits & FAIL_BIT → falhou (senha/SSID)
+if (bits & WIFI_CONNECTED_BIT)      ESP_LOGI(TAG, "Connected with success");
+else if (bits & WIFI_FAIL_BIT)      ESP_LOGE(TAG, "Connection Failed");
 ```
-Sucesso no monitor: `Wifi STA inicializado` → `got IP: 192.168.x.y` → `conectado com sucesso!`.
+Erros que passaram pelo caminho (guardar): (1) montar o struct e ESQUECER de chamar `set_config` (struct
+em C não tem efeito colateral — só "faz algo" quando passado a quem o consome); (2) `strcpy` sem cast →
+warning *incompatible pointer types* (`sta.ssid` é `uint8_t[]`, não `char*`); (3) passar `wifi_cfg` por
+valor em vez de `&wifi_cfg` (as APIs do IDF recebem structs por ponteiro p/ não copiar ~100B na pilha).
+
+## Lições do LOG REAL da 1ª conexão (roteador "GL ONE", WPA2)
+- **O retry funcionou de verdade:** associou no canal 1 (`assoc -> run`), CAIU ~10s depois (`run -> init 0xcc00`),
+  handler consumiu `DISCONNECTED` 5x (`retry 1/5..5/5`); AP reapareceu no **canal 6** e conectou (`got IP: 172.20.8.15`).
+  Como reconectou antes de estourar o limite, NUNCA setou FAIL_BIT. Todo o ciclo async→event group→síncrono foi exercitado.
+- **Canal 1 → 6:** roteador dual-band/mesh empurrou p/ outro canal; `auth -> init (0x200)` = rejeição de auth naquele BSSID. Ambiente real, não bug.
+- **`authmode threshold changes from OPEN to WPA2`:** como a senha tem comprimento WPA2, o driver SOBE o threshold sozinho → não precisou setar `.threshold.authmode` manualmente. Default é seguro.
+- **`Returned from app_main()` é NORMAL:** `app_main` roda na `main_task`, que termina ao retornar; FreeRTOS e demais tasks seguem vivos.
+- Robustez: retry zera o contador no GOT_IP; limite 5 foi suficiente aqui (AP demorou ~15s). É número de POLÍTICA, não mágico.
+
+# 🎯 REFATORAÇÃO (RETOMAR AQUI): extrair WiFi p/ componente `wifi_sta`
+Motivo: `app_main` virou paredão de setup + `wifi_event_handler`/`s_wifi_events` globais boiando no `.c`.
+Mesmo padrão do `lcd_i2c`, mas p/ recurso ASSÍNCRONO. **Fazer ANTES do SNTP** (main pequeno = refator limpo).
+
+## Contrato escolhido (decisões tomadas nesta sessão)
+- **SEM handle** (opção A). O rádio `esp_wifi` STA é **singleton** (só existe UM no chip) → forçar handle
+  como no LCD seria artificial. Estado interno vira `static` no `.c`.
+- **NÃO-bloqueante** → split `start` + `wait` (mesmo padrão do SNTP do IDF: `sntp_init` dispara / `sntp_sync_wait` bloqueia):
+  ```c
+  // components/wifi_sta/inc/wifi_sta.h
+  esp_err_t wifi_sta_start(void);                        // dispara tudo, volta NA HORA
+  esp_err_t wifi_sta_wait_connected(TickType_t timeout); // bloqueia; ESP_OK / ESP_ERR_TIMEOUT / erro
+  ```
+  A operação não prende ninguém; quem ESCOLHE bloquear é o main (chamando `wait` quando quiser). No boot ele
+  acaba bloqueando no `wait` — e tudo bem, agora é ESCOLHA do main, não imposição.
+- **SSID/senha via Kconfig** (mantém `CONFIG_WIFI_SSID`/`CONFIG_WIFI_PWD`). Kconfig.projbuild fica onde está por ora.
+- **NVS fica no `app_main`** (fundação), NÃO no componente — NVS não é "do WiFi" (LCD/SNTP/app também usam).
+  Documentar no header como **pré-condição**: `// pré-cond: NVS + event loop default já inicializados`.
+
+## Vai pra dentro do `.c` (tudo `static`, some da vista do main)
+`wifi_event_handler`, `s_wifi_events`, `s_retry_count`, `#define`s dos bits e `MAX_RETRY`, leitura do Kconfig.
+
+## Ordem DENTRO de `wifi_sta_start()` (justificada)
+```
+criar event group → create_default_wifi_sta → wifi_init
+→ registrar handlers → set_mode → set_config → esp_wifi_start
+```
+- **event group ANTES de registrar handler:** handler faz `SetBits(s_wifi_events)`; se chegar evento com group NULL → crash/corrida de init.
+- **handlers ANTES de `esp_wifi_start`:** `esp_wifi_start` dispara `WIFI_EVENT_STA_START` quase imediatamente;
+  é o handler (caso STA_START) que chama `esp_wifi_connect`. Se o handler não estiver registrado, o evento é
+  DESCARTADO (loop sem inscritos) → rádio sobe e fica parado p/ sempre, sem erro. É corrida — registrar depois é apostar e perder.
+  Regra geral de modelo por eventos: **inscreva-se no canal ANTES da ação que gera o evento.**
+- **`s_wifi_events` `static` (não local):** `start` retorna e sua stack some, mas `wait` (chamada depois) e os
+  handlers ainda usam o group → tem que sobreviver a quem criou (mesmo lifetime do `m->done` do marquee).
+
+## CMakeLists
+- Componente: `REQUIRES esp_wifi esp_netif esp_event freertos` (freertos pq `TickType_t`/event group aparecem
+  no HEADER PÚBLICO → obriga REQUIRES, não PRIV_REQUIRES). `nvs_flash` NÃO entra (fica no main).
+- `main/CMakeLists.txt`: adicionar `wifi_sta`; manter `nvs_flash` (main ainda usa direto).
+
+## Passos
+1. Criar os 3 arquivos (`inc/wifi_sta.h`, `src/wifi_sta.c`, `CMakeLists.txt`) + as 2 assinaturas (esqueleto, sem lógica).
+2. Mover a lógica do `app_main` p/ dentro. `app_main` fica: fundação NVS/netif/loop → `wifi_sta_start()` → `wifi_sta_wait_connected(portMAX_DELAY)`.
+3. Build → confirmar que AINDA conecta. Só então atacar SNTP.
 
 ## Decisões já tomadas
 - SSID/senha via **Kconfig/menuconfig** (FEITO): `main/Kconfig.projbuild` define `CONFIG_WIFI_SSID` e `CONFIG_WIFI_PWD`. Default do PWD é placeholder (`Pwd@123`), senha real só no `sdkconfig` local.
